@@ -23,5 +23,7 @@ source activate test-environment
 # TODO: Add pinning for numpy and pandas to test past versions.
 conda install --file tests/requirements.txt
 
+pip install black flake8
+
 # Install lens
 pip install -e .
