@@ -44,4 +44,6 @@ install:
 
 script:
    - flake8 lens
+   - flake8 --ignore=F811 tests
+   - black --check lens tests
    - py.test $PYTEST_OPTIONS

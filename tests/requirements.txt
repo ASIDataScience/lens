@@ -1,3 +1,4 @@
+black
 boto3
 cloudpickle
 dask
