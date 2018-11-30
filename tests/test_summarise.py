@@ -6,6 +6,7 @@ import datetime
 
 import numpy as np
 import pandas as pd
+import dask
 
 import pytest
 
@@ -212,13 +213,16 @@ def test_dask_outliers(df, column_summary):
 
 @pytest.fixture(scope="module")
 def frequencies(df, column_properties):
-    return {
-        col: metrics.frequencies(df[col], column_properties[col])
-        for col in df.columns
-    }
+    [freqs] = dask.compute(
+        {
+            col: metrics.frequencies(df[col], column_properties[col])
+            for col in df.columns
+        }
+    )
+    return freqs
 
 
-def test_dask_frequencies(df, frequencies):
+def test_dask_frequencies(df, column_properties, frequencies):
     for col in frequencies.keys():
         freq_report = frequencies[col]
         if freq_report is None:
@@ -226,7 +230,9 @@ def test_dask_frequencies(df, frequencies):
         else:
             freq_report = freq_report[col]
 
-        freqs = df[col].value_counts().to_dict()
+        freqs = df[col].compute().value_counts().to_dict()
+
+        assert len(freq_report) == column_properties[col][col]["unique"]
 
         for k in freqs.keys():
             assert freqs[k] == freq_report[k]

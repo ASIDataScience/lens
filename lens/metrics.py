@@ -4,13 +4,17 @@ from __future__ import division
 
 import logging
 import time
-from functools import wraps
+from functools import wraps, reduce
+from operator import add
+from collections import Counter
 
 from tdigest import TDigest
 import numpy as np
 from scipy import stats
 from scipy import signal
 import pandas as pd
+import dask
+from dask.delayed import delayed
 
 from .utils import hierarchical_ordering_indices
 
@@ -20,6 +24,13 @@ CAT_FRAC_THRESHOLD = 0.5
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
+
+
+@delayed
+def _tdigest_partition(values, delta):
+    digest = TDigest(delta)
+    digest.batch_update(values)
+    return digest
 
 
 def timeit(func):
@@ -86,15 +97,15 @@ def column_properties(series):
     name = series.name
     colresult = {}
     colresult["dtype"] = str(series.dtype)
-    nulls = series.isnull().sum()
+    nulls = series.isnull().sum().compute()
     colresult["nulls"] = int(nulls) if not np.isnan(nulls) else 0
     notnulls = series.dropna()
 
-    colresult["notnulls"] = len(notnulls.index)
+    colresult["notnulls"] = int(notnulls.index.size.compute())
     colresult["numeric"] = (
         series.dtype in [np.float64, np.int64] and colresult["notnulls"] > 0
     )
-    unique = notnulls.unique().size
+    unique = int(notnulls.unique().size.compute())
     colresult["unique"] = unique
     colresult["is_categorical"] = False
     if (
@@ -254,7 +265,7 @@ def column_summary(series, column_props, delta=0.01):
 
     Parameters
     ----------
-    series : pd.Series
+    series : dask.dataframe.Series
         Numeric column.
     column_props : TODO
         TODO
@@ -272,32 +283,40 @@ def column_summary(series, column_props, delta=0.01):
 
     logger.debug("column_summary - " + col)
 
-    # select non-nulls from column
-    data = series.dropna()
+    # select non-nulls from column and convert to dask array
+    data = series.dropna().map_partitions(np.asarray)
 
-    colresult = {}
-    for m in ["mean", "min", "max", "std", "sum"]:
-        val = getattr(data, m)()
-        if type(val) is np.int64:
-            colresult[m] = int(val)
-        else:
-            colresult[m] = val
+    delayed_colresult = {}
+    for m in ["std", "sum"]:
+        delayed_colresult[m] = getattr(data, m)()
+
+    [colresult] = dask.compute(delayed_colresult)
 
     colresult["n"] = column_props[col]["notnulls"]
 
+    # Compute the t-digest.
+    logger.debug("column_summary - {} - creating TDigest...".format(col))
+
+    digest = delayed(reduce)(
+        add,
+        [
+            _tdigest_partition(partition, delta)
+            for partition in data.to_delayed()
+        ],
+    ).compute()
+
     percentiles = [0.1, 1, 10, 25, 50, 75, 90, 99, 99.9]
     colresult["percentiles"] = {
-        perc: np.nanpercentile(series, perc) for perc in percentiles
+        perc: digest.percentile(perc) for perc in percentiles
     }
+    colresult["min"] = digest.percentile(0)
+    colresult["max"] = digest.percentile(100)
+    colresult["mean"] = digest.trimmed_mean(0, 100)
     colresult["median"] = colresult["percentiles"][50]
+
     colresult["iqr"] = (
         colresult["percentiles"][75] - colresult["percentiles"][25]
     )
-
-    # Compute the t-digest.
-    logger.debug("column_summary - {} - creating TDigest...".format(col))
-    digest = TDigest(delta)
-    digest.batch_update(data)
 
     logger.debug("column_summary - {} - testing log trans...".format(col))
     try:
@@ -386,7 +405,7 @@ def _compute_histogram_from_frequencies(series):
     counts, edges:
         Histogram bin edges and counts in each bin.
     """
-    freqs = _compute_frequencies(series)
+    [freqs] = dask.compute(_compute_frequencies(series))
     categories = sorted(freqs.keys())
     diffs = list(np.diff(categories)) + [1]
     edges = [categories[0] - 0.5]
@@ -402,12 +421,24 @@ def _compute_histogram_from_frequencies(series):
     return np.array(counts), np.array(edges)
 
 
-def _compute_frequencies(series):
+@delayed
+def _compute_chunk_counter(array, dtype):
+    keys, counts = np.unique(array, return_counts=True)
+
+    if dtype == np.int64:
+        keys = [int(key) for key in keys]
+    elif dtype == np.float64:
+        keys = [float(key) for key in keys]
+
+    return Counter(dict(zip(keys, counts)))
+
+
+def _compute_frequencies(array):
     """Helper to compute frequencies of a categorical column
 
     Parameters
     ----------
-    series : pd.Series
+    array : dask.Array
         Categorical column.a
 
     Returns
@@ -415,14 +446,13 @@ def _compute_frequencies(series):
     dict:
         Dictionary from category name to count.
     """
-    freqs = series.value_counts()
-    if freqs.index.dtype == np.int64:
-        categories = [int(index) for index in freqs.index]
-    elif freqs.index.dtype == np.float64:
-        categories = [float(index) for index in freqs.index]
-    else:
-        categories = freqs.index
-    return dict(zip(categories, freqs.values.tolist()))
+    return delayed(reduce)(
+        add,
+        [
+            _compute_chunk_counter(chunk, array.dtype)
+            for chunk in array.to_delayed()
+        ],
+    )
 
 
 @timeit
@@ -444,7 +474,7 @@ def frequencies(series, column_props):
 
     if column_props[name]["is_categorical"]:
         logger.debug("frequencies - " + series.name)
-        freqs = _compute_frequencies(series)
+        freqs = _compute_frequencies(series.dropna().values)
         return {name: freqs, "_columns": [name]}
     else:
         return None
