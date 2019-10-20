@@ -43,8 +43,7 @@ def _render(fig, showlegend=None):
         logger.error(message)
         raise ValueError(message)
     else:
-        if not py.offline.__PLOTLY_OFFLINE_INITIALIZED:
-            py.init_notebook_mode()
+        py.init_notebook_mode()
         return py.iplot(fig, **PLOTLY_KWS)
 
 
