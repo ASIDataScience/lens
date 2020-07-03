@@ -38,7 +38,7 @@ setup(
         "ipywidgets>=6.0.0",
         "matplotlib",
         "numpy>=1.11",
-        "pandas",
+        "pandas>=0.24.0",
         "plotly>=3.0.0",
         "scipy",
         "tdigest>=0.5.0",

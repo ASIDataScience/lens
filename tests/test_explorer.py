@@ -159,7 +159,7 @@ def test_correlation_plot_annotations(artworks_df, artworks_summary):
     def mock_render(fig):
         assert len(fig["data"]) == 1
         corr = [item for row in fig["data"][0]["z"] for item in row]
-        labels = [l["text"] for l in fig["layout"]["annotations"]]
+        labels = [label["text"] for label in fig["layout"]["annotations"]]
         for c, l in zip(corr, labels):
             assert "{:.2g}".format(c) == l
 

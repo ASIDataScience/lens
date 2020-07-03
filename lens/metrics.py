@@ -860,7 +860,7 @@ def pairdensity(df, column_props, column_summ, freq, log_transform=True):
             if "" in y:
                 y[y.index("")] = " Null"
 
-            density = dfcs.get_values()
+            density = dfcs.to_numpy()
         else:
             x, y = categories
             density = np.zeros((len(x), len(y)))

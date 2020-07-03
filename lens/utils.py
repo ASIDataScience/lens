@@ -64,8 +64,8 @@ def axis_ticklabels_overlap(labels):
     if not labels:
         return False
     try:
-        bboxes = [l.get_window_extent() for l in labels]
-        overlaps = [b.count_overlaps(bboxes) for b in bboxes]
+        bboxes = [label.get_window_extent() for label in labels]
+        overlaps = [bbox.count_overlaps(bboxes) for bbox in bboxes]
         return max(overlaps) > 1
     except RuntimeError:
         # Issue on macosx backend rasies an error in the above code

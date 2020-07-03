@@ -142,9 +142,9 @@ def test_dask_column_summary(df, column_summary):
         )
 
         exact_meanminmax = [
-            np.nanmean(series.get_values()),
-            np.nanmin(series.get_values()),
-            np.nanmax(series.get_values()),
+            np.nanmean(series.to_numpy()),
+            np.nanmin(series.to_numpy()),
+            np.nanmax(series.to_numpy()),
         ]
         rep_meanminmax = [cs_report[x] for x in ["mean", "min", "max"]]
         np.testing.assert_allclose(
